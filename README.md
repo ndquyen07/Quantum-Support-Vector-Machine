@@ -2,10 +2,13 @@
 
 **The first fully quantum implementation of Quantum Support Vector Machine – from feature mapping to classification, no classical solver involved.**
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.13%2B-blue.svg)](https://python.org)
 [![Qiskit](https://img.shields.io/badge/Qiskit-Latest-purple.svg)](https://qiskit.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active%20Development-yellow.svg)]()
+[![GitHub issues](https://img.shields.io/github/issues/ndquyen07/Quantum-Support-Vector-Machine)](https://github.com/ndquyen07/Quantum-Support-Vector-Machine/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/ndquyen07/Quantum-Support-Vector-Machine)](https://github.com/ndquyen07/Quantum-Support-Vector-Machine/pulls)
+
 
 ## 📖 Overview
 
@@ -206,16 +209,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🏷️ Citation
 
-Cite as: arXiv:2505.04234v1 [quant-ph]
+If you use this work, please cite:
 
-```bibtex
-@misc{quantum_svm_2025,
-  title={Fully Quantum Support Vector Machine Implementation},
-  author={[Nguyen Dinh Quyen]},
-  year={2025},
-  url={https://github.com/ndquyen07/Quantum-Support-Vector-Machine}
-}
-```
+**arXiv:** [arXiv:2505.04234v1 [quant-ph]](https://arxiv.org/abs/2505.04234v1)
 
 ---
 
