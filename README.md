@@ -17,11 +17,7 @@ This repository implements a **fully Quantum Support Vector Machine** using vari
 ### 🔬 Key Features
 
 - **🔵 Trainable Quantum Feature Maps**: Parametric quantum circuits that learn optimal data representations
-- **⚡ Quantum Kernel Estimation**: Direct computation of kernel matrices using quantum inner products
-- **🧩 Decomposition**: Modular tools for breaking down kernel matrieces into Pauli Operators
 - **🧠 Core QSVM Algorithm**: End-to-end QuantumSVM implementation, from feature mapping to classification 
-- **📊 Comprehensive Analysis Tools**: Built-in performance evaluation and algorithm correctness assessment
-- **🎯 Smart Parameter Initialization**: Intelligent initialization strategies with perturbation-based restarts to overcome local minima
 
 
 ## 🏗️ Architecture
@@ -33,13 +29,7 @@ This repository implements a **fully Quantum Support Vector Machine** using vari
 ├── 🎯 qsvm.py             # Main QSVM Implementation
 ├── 🔧 decompose.py       # Circuit decomposition tools
 
-📁 experiment/
-├── 📓 sv_qsvm_7.ipynb     # Main experimental notebook
-├── 📈 tqfm.ipynb          # Feature map training experiments
-└── 🧪 [other experiments] # Additional validation studies
 
-📁 result/
-└── 📊 [visualization outputs] # Generated plots and analysis
 ```
 
 ## 🚀 Quick Start
@@ -100,104 +90,6 @@ K(x_i, x_j) = |⟨Ψ(x_i,θ)|Ψ(x_j,θ)⟩|²
 
 This enables direct quantum advantage for kernel-based classification.
 
-### Smart Parameter Initialization
-
-To overcome local minima in quantum optimization landscapes, we implement:
-
-- **🎯 Perturbation-based initialization**: Small random perturbations around good parameters
-- **🔄 Multi-restart strategy**: Multiple optimization attempts with different starting points  
-- **📊 Statistical validation**: Comprehensive performance assessment across runs
-
-## 📊 Performance
-
-### Benchmark Results (Breast Cancer Dataset)
-
-| Method | Accuracy | Std Dev | Best Run |
-|--------|----------|---------|----------|
-| **Quantum SVM** | **82.4%** | ±15.2% | **97.06%** |
-| Classical SVM | 91.9% | - | 91.9% |
-
-**Key Insights:**
-- ✅ Best quantum runs **exceed classical performance**
-- ✅ Algorithm demonstrates **genuine quantum optimization**
-- ✅ High variance is **expected and normal** for quantum variational algorithms
-- ✅ Multiple local optima indicate **complex quantum landscapes**
-
-### Algorithm Correctness Assessment
-
-Our comprehensive analysis confirms:
-
-- **🎯 Competitive Performance**: 32% of runs achieve ≥90% accuracy
-- **📈 Proper Optimization**: Clear correlation between loss minimization and performance
-- **🔄 Consistent Implementation**: No systematic biases or implementation bugs
-- **📊 Statistical Validity**: Results follow expected quantum optimization patterns
-
-## 🧪 Experiments
-
-### Main Experiments
-
-1. **`sv_qsvm_7.ipynb`**: Comprehensive QSVM evaluation with statistical analysis
-2. **`tqfm.ipynb`**: Trainable quantum feature map optimization
-3. **Parameter Initialization Studies**: Smart initialization vs random starts
-
-### Running Experiments
-
-```bash
-# Navigate to experiment directory
-cd experiment/
-
-# Run main QSVM experiment
-jupyter notebook sv_qsvm_7.ipynb
-```
-
-## 🛠️ Advanced Usage
-
-### Custom Feature Maps
-
-```python
-# Create custom parameterized quantum circuit
-def custom_feature_map(nqubits, depth):
-    qc = QuantumCircuit(nqubits)
-    # Add your custom gates...
-    return qc
-circuit = custom_feature_map(nqubits, depth)
-
-tqfm = TrainableQuantumFeatureMap(depth=depth, optimizer='COBYLA', maxiter=100)
-tqfm.fit(circuit=circuit)
-```
-
-### Smart Parameter Initialization
-
-```python
-# Use parameters from previous successful run
-best_params = [1.801, 2.708, 1.412, 3.264, ...]
-
-qsvc = QSVC(optimizer='COBYLA', max_iter=100)
-qsvc.fit(
-    X_train, y_train, 
-    kernel_matrix=kernel,
-    initial_params=best_params,
-    perturbation_scales=[0.01, 0.05, 0.1] (update soon)
-)
-```
-
-## 📈 Results & Visualizations
-
-The algorithm generates comprehensive analysis including:
-
-- 📊 **Loss vs Accuracy Scatter Plots**: Correlation analysis
-- 📈 **Performance Distribution Histograms**: Statistical characterization  
-- 🎯 **Correctness Assessment Reports**: Algorithm validation
-- 📉 **Optimization Convergence Plots**: Training dynamics
-
-## 🤝 Contributing
-
-We welcome contributions! Areas of interest:
-
-- 🔧 **Algorithm Improvements**: Better optimization strategies
-- 📊 **New Benchmarks**: Additional datasets and comparisons
-- 🚀 **Performance Optimization**: Circuit efficiency improvements
-- 📖 **Documentation**: Enhanced tutorials and examples
 
 ## 📚 References
 
@@ -208,8 +100,6 @@ We welcome contributions! Areas of interest:
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🏷️ Citation
-
-If you use this work, please cite:
 
 **arXiv:** [arXiv:2505.04234v1 [quant-ph]](https://arxiv.org/abs/2505.04234v1)
 
