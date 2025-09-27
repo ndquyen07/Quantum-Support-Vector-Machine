@@ -1,11 +1,14 @@
-from scipy.optimize import minimize
 from qiskit.quantum_info import Statevector
-from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
+from qiskit import QuantumCircuit
 from qiskit_aer import AerSimulator
 from qiskit import transpile
+
 from src.decompose import Decomposer
-from qiskit.circuit import ParameterVector
+from src.ansatz import Ansatz
+
 import numpy as np
+from scipy.optimize import minimize
+
 
 
 class QSVC:
@@ -13,7 +16,7 @@ class QSVC:
     Custom Variational Quantum Support Vector Classifier (QSVC) implementation.
     """
 
-    def __init__(self, C=1.0, gamma=1.0, random=False, num_samples=None, optimizer="COBYLA", max_iter=100):
+    def __init__(self, C=1.0, gamma=1.0, depth=1, type_ansatz='EfficientSU2', random=False, num_samples=None, optimizer="COBYLA", max_iter=100):
         """
         Initialize the QSVC instance.
 
@@ -25,6 +28,8 @@ class QSVC:
 
         self.m = None
         self.ansatz = None
+        self.type_ansatz = type_ansatz
+        self.depth = depth
         self.initial_xi = None
 
         self.support_vectors = None
@@ -44,7 +49,6 @@ class QSVC:
 
         self.transpile = transpile
         self.simulator = AerSimulator()
-        self.decomposer = Decomposer()
 
         self.optimizer = optimizer
         self.max_iter = max_iter
@@ -56,63 +60,38 @@ class QSVC:
 
         self.loss_history = []
 
-    def _ansatz_circuit(self, depth=3):
-        ansatz = QuantumCircuit(self.m, name='Ansatz')
-        xi = ParameterVector('ξ', length= 3 * depth)
-        for i in range(self.m):
-            ansatz.h(i)
 
-        param_idx = 0
-        for _ in range(depth):
-            for i in range(self.m):
-                ansatz.rz(xi[param_idx], i)
-            param_idx += 1
-            for i in range(self.m):
-                ansatz.ry(xi[param_idx], i)
-            param_idx += 1
-            for i in range(self.m):
-                ansatz.rz(xi[param_idx], i)
-            param_idx += 1
-            for i in range(self.m - 1):
-                ansatz.cz(i, i + 1)
-        return ansatz
-
-            
-
-    def _hadamard_test_circuit(self, bound_circuit, with_cz=False):
+    @staticmethod
+    def hadamard_test_circuit(num_qubit, bound_circuit, with_cz=False):
         """
         Create a Hadamard test circuit.
         """
 
-        # Create registers
-        anc = QuantumRegister(1, 'ancilla')
-        data = QuantumRegister(self.m, 'data')
-        cr = ClassicalRegister(1, 'measure')
-        qc = QuantumCircuit(anc, data, cr)
+        # total_qubits = ancilla (1) + data (m)
+        qc = QuantumCircuit(1 + num_qubit, 1)
 
-        bound_circuit = bound_circuit
+        anc = 0
+        data = list(range(1, 1 + num_qubit))
 
-        # Hadamard on ancillary
-        qc.h(anc[0])
-
+        qc.h(anc)
         controlled_ansatz = bound_circuit.to_gate().control(1)
-        qc.append(controlled_ansatz, [anc[0]] + list(range(1, 1 + self.m)))
+        qc.append(controlled_ansatz, [anc] + data)
 
-        # Apply H ⊗ m on data qubits
-        for i in range(self.m):
-            qc.h(data[i])
+        for i in data:
+            qc.h(i)
 
         # Optional controlled-Z for l(α)
         if with_cz:
-            qc.cz(anc[0], data[0])  # Control on anc, target on first data qubit (Z_1)
+            qc.cz(anc, data[0]) 
 
-        # Final Hadamard on ancillary    
-        qc.h(anc[0])
-        qc.measure(anc[0], cr[0])
+        qc.h(anc)
+        qc.measure(anc, 0)
 
         return qc
+    
 
-    def _compute_expectation(self, bound_circuit, hamiltonian):
+    @staticmethod
+    def _compute_expectation(bound_circuit, hamiltonian):
         """
         Compute the expectation value <ψ(θ)|H|ψ(θ)>
         """
@@ -198,7 +177,6 @@ class QSVC:
         r"""
         Compute the loss function
         L(\alpha) = \min_{\alpha} \frac{1}{2}\langle\alpha|K|\alpha\rangle - || | \alpha \rangle||_1 + Cl^2(\alpha)
-        
         """
         try:
             param_dict = {param: xi[i] for i, param in enumerate(self.ansatz.parameters)}
@@ -208,17 +186,17 @@ class QSVC:
             expectation = self._compute_expectation(bound_circuit, hamiltonian)
 
             # Compute || |α> ||_1
-            qc_2 = self._hadamard_test_circuit(bound_circuit, with_cz=False)
+            qc_2 = self.hadamard_test_circuit(self.m ,bound_circuit, with_cz=False)
             l1_norm = self._compute_l1_norm(qc_2)
 
             # Compute l(α)
-            qc_3 = self._hadamard_test_circuit(bound_circuit, with_cz=True)
+            qc_3 = self.hadamard_test_circuit(self.m, bound_circuit, with_cz=True)
             l_alpha = self._compute_l_alpha(qc_3)
 
             # Compute L(α)
             loss = 0.5 * expectation - l1_norm + self.penalty * (l_alpha ** 2)
 
-            # Store loss history (like VQEplus)
+            # Store loss history 
             self.loss_history.append(loss)
             
             # Print iteration progress
@@ -240,9 +218,14 @@ class QSVC:
             for j in range(kernel_matrix.shape[1]):
                 K[i, j] = self.y[i] * self.y[j] * kernel_matrix[i, j] + (1 if i == j else 0) / self.gamma
 
-        sparse_op = self.decomposer.decompose(K, random=self.random, num_samples=self.num_samples)
+        if self.random:
+            sparse_op = Decomposer.decompose_random(K, num_samples=self.num_samples)
+        else:
+            sparse_op = Decomposer.decompose_exact(K)
+            
         return sparse_op
 
+    
 
     def fit(self, X, y, kernel_matrix, theta_optimal, parametrized_circuit, initial_xi=None, ansatz=None):
         """
@@ -256,7 +239,10 @@ class QSVC:
         self.parametrized_circuit = parametrized_circuit
 
         self.m = int(np.ceil(np.log2(len(self.X))))
-        self.ansatz = self._ansatz_circuit() if ansatz is None else ansatz
+        if ansatz is None:
+            self._set_ansatz(self.type_ansatz, self.m, self.depth)
+        else:
+            self.ansatz = ansatz
 
         self.basis_states = [Statevector.from_label(bv) for bv in [format(i, f"0{self.m}b") for i in range(2**self.m)]]
 
@@ -264,7 +250,7 @@ class QSVC:
         expected_param_count = len(self.ansatz.parameters)
         
         if initial_xi is None:
-            self.initial_xi = np.random.uniform(0, 2*np.pi, expected_param_count)
+            self.initial_xi = np.random.uniform(-np.pi, np.pi, expected_param_count)
             print(f"Using random initialization with {expected_param_count} parameters")
         else:
             # Validate and fix parameter dimensions if needed
@@ -284,8 +270,8 @@ class QSVC:
                 print(f"Using provided initialization with {len(initial_xi)} parameters")
             
             # Add small perturbation to avoid exact reuse (prevents local minima sticking)
-            perturbation_scale = 0.05  # Small perturbation (5% of 2π range)
-            perturbation = np.random.normal(0, perturbation_scale, expected_param_count)
+            perturbation = 0.05  # Small perturbation (5% of 2π range)
+            perturbation = np.random.normal(-perturbation, perturbation, expected_param_count)
             self.initial_xi = self.initial_xi + perturbation
 
 
@@ -497,6 +483,30 @@ class QSVC:
         plt.close()
 
 
+    def plot_state_alpha(self, shots=1024):
+        """
+        Measure the state |α⟩ in the computational basis.
+        """
+        import matplotlib.pyplot as plt
+        from qiskit.visualization import plot_histogram
+
+
+        if self.state_alpha is None:
+            raise ValueError("State |α⟩ is not prepared. Run fit() first.")
+
+        qc = self.ansatz.copy()
+        param_dict = {param: self.optimal_params[i]
+                      for i, param in enumerate(self.ansatz.parameters)}
+        qc = qc.assign_parameters(param_dict)
+        qc.measure_all()
+
+        transpiled_qc = self.transpile(qc, self.simulator)
+        job = self.simulator.run(transpiled_qc, shots=shots)
+        result = job.result()
+        counts = result.get_counts()
+        return plot_histogram(counts)
+
+
     def get_optimal_params(self):
         """
         Get the optimal parameters after fitting.
@@ -517,9 +527,12 @@ class QSVC:
         return self.optimal_value
     
 
-    def set_parameter(self, initial_xi: np.array, ansatz: QuantumCircuit = None):
+    def set_parameter(self, C: float, gamma: float, initial_xi: np.array = None, ansatz: QuantumCircuit = None):
         """Set the initial parameter values."""
-        self.initial_xi = initial_xi
+        self.penalty = C
+        self.gamma = gamma
+        self.initial_xi = initial_xi if initial_xi is not None else self.initial_xi
+
         if ansatz is not None:
             self.ansatz = ansatz
 
@@ -530,6 +543,16 @@ class QSVC:
         self.max_iter = maxiter
 
 
+    def _set_ansatz(self, type: str = 'EfficientSU2', num_qubits: int = 4, depth: int = 1, **kwargs):
+        """
+        Set ansatz circuit.
+        """
+        if type == 'TwoLocal':
+            self.ansatz = Ansatz.TwoLocal(num_qubits, depth=depth, **kwargs)
+        elif type == 'RealAmplitudes':
+            self.ansatz = Ansatz.RealAmplitudes(num_qubits, depth=depth, **kwargs)
+        elif type == 'EfficientSU2':
+            self.ansatz = Ansatz.EfficientSU2(num_qubits, depth=depth, **kwargs)
 
 
 if __name__ == "__main__":

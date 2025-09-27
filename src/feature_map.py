@@ -7,9 +7,10 @@ from scipy.optimize import minimize
 
 class TrainableQuantumFeatureMap:
     """Trainable Quantum Feature Map (TQFM) implementation."""
-    
-    def __init__(self, depth: int = 1, optimizer: str = 'COBYLA', maxiter: int = 100):
+
+    def __init__(self, depth: int = 1, type_ansatz: str = "EfficientSU2" , optimizer: str = 'COBYLA', maxiter: int = 100):
         self.depth = depth
+        self.type = type_ansatz
         self.optimizer = optimizer
         self.maxiter = maxiter
 
@@ -24,38 +25,8 @@ class TrainableQuantumFeatureMap:
         self.optimal_params = None
         self.optimal_value = None
 
-        self.optimizer = 'COBYLA'
-        self.maxiter = 100
-
         self.loss_history = []
 
-        
-    def _create_parametrized_circuit(self, num_qubits) -> QuantumCircuit:
-        """Create a parametrized quantum circuit for feature mapping."""
-        qc = QuantumCircuit(num_qubits)
-
-        data_params = ParameterVector('x', length=num_qubits)
-        # Calculate total theta parameters needed: num_qubits for each layer (depth + 1)
-        total_theta_params = num_qubits * (self.depth + 1)
-        theta_params = ParameterVector('θ', length=total_theta_params)
-        param_idx = 0
-
-        # Initial first layer
-        for i in range(num_qubits):
-            qc.ry(data_params[i] + theta_params[param_idx], i)
-            param_idx += 1
-
-        # Repeat layers
-        for _ in range(self.depth):
-            # Entangling gates
-            for i in range(num_qubits - 1):
-                qc.cx(i, i + 1)
-            # Parametrized rotation gates
-            for i in range(num_qubits):
-                qc.ry(data_params[i] + theta_params[param_idx], i)
-                param_idx += 1
-        
-        return qc
 
     def _loss(self, theta, num_qubits, X, y, circuit_template, num_classes):
         """
@@ -122,7 +93,6 @@ class TrainableQuantumFeatureMap:
 
 
 
-
     def fit(self, X: np.ndarray, y: np.ndarray, init_theta: np.ndarray=None, circuit: QuantumCircuit=None) -> float:
         """Fit the quantum feature map to the data."""
         self.X = X
@@ -130,14 +100,20 @@ class TrainableQuantumFeatureMap:
 
         self.num_qubits = X.shape[1]
         self.num_classes = len(np.unique(y))
-        self.circuit = circuit if circuit is not None else self._create_parametrized_circuit(self.num_qubits)
 
-        self.init_theta = init_theta
-        if self.init_theta is None:
-            # Initialize theta randomly
+        if circuit is None:
+            self._set_circuit(type=self.type)
+        else:
+            self.circuit = circuit
+
+        if init_theta is None:
             num_params = len(self.circuit.parameters) - self.num_qubits
-            self.init_theta = np.random.uniform(0, 2 * np.pi, num_params)
+            # self.init_theta = np.random.uniform(-np.pi, np.pi, num_params)
+            self.init_theta = np.zeros((num_params,))
+        else:
+            self.init_theta = init_theta
 
+        
         # Clear previous loss history
         self.loss_history = []
 
@@ -204,6 +180,20 @@ class TrainableQuantumFeatureMap:
         plt.close()
 
 
+    def _set_circuit(self, type= 'EfficientSU2'):
+
+        """Set a custom quantum circuit."""
+        if type == 'TwoLocal':
+            self.circuit = ParametrizedCircuit.TwoLocal_circuit(self.num_qubits, self.depth)
+        elif type == 'RealAmplitudes':
+            self.circuit = ParametrizedCircuit.RealAmplitudes_circuit(self.num_qubits, self.depth)
+        elif type == 'EfficientSU2':
+            self.circuit = ParametrizedCircuit.EfficientSU2_circuit(self.num_qubits, self.depth)
+        else:
+            raise ValueError(f"Unknown circuit type: {type}")
+        
+
+
     def get_optimal_params(self) -> np.ndarray:
         """Get the optimal parameters after fitting."""
         return self.optimal_params
@@ -220,6 +210,108 @@ class TrainableQuantumFeatureMap:
         """Set the optimizer and its parameters."""
         self.optimizer = optimizer
         self.maxiter = maxiter
+
+
+
+
+class ParametrizedCircuit:
+    """Class to create parameterized quantum circuits (ansatz)."""
+
+    @staticmethod
+    def TwoLocal_circuit(num_qubits, depth) -> QuantumCircuit:
+        qc = QuantumCircuit(num_qubits)
+
+        data_params = ParameterVector('x', length=num_qubits)
+        # Calculate total theta parameters needed: num_qubits for each layer (depth + 1)
+        num_gates = 2
+        total_theta_params = num_qubits * 2 + num_qubits * depth * num_gates
+        theta_params = ParameterVector('θ', length=total_theta_params)
+        param_idx = 0
+
+        # Initial first layer
+        for i in range(num_qubits):
+            qc.ry(data_params[i] + theta_params[param_idx], i)
+            param_idx += 1
+        for i in range(num_qubits):
+            qc.rz(data_params[i] + theta_params[param_idx], i)
+            param_idx += 1
+        
+        # Layers of parameterized rotations and entangling gates
+        for _ in range(depth):
+            for i in range(num_qubits - 1):
+                qc.cz(i, i + 1)
+            for i in range(num_qubits):
+                qc.ry(data_params[i] + theta_params[param_idx], i)
+                param_idx += 1
+            for i in range(num_qubits):
+                qc.rz(data_params[i] + theta_params[param_idx], i)
+                param_idx += 1
+
+        return qc
+
+
+    @staticmethod
+    def RealAmplitudes_circuit(num_qubits, depth) -> QuantumCircuit:
+        qc = QuantumCircuit(num_qubits)
+
+        data_params = ParameterVector('x', length=num_qubits)
+        # Calculate total theta parameters needed: num_qubits for each layer (depth + 1)
+        num_gates = 1
+        total_theta_params = num_qubits + num_qubits * depth * num_gates
+        theta_params = ParameterVector('θ', length=total_theta_params)
+        param_idx = 0
+
+        # Initial first layer
+        for i in range(num_qubits):
+            qc.ry(data_params[i] + theta_params[param_idx], i)
+            param_idx += 1
+
+        # Layers of parameterized rotations and entangling gates
+        for _ in range(depth):
+            for i in range(num_qubits - 1):
+                qc.cx(i, i + 1)
+            for i in range(num_qubits):
+                qc.ry(data_params[i] + theta_params[param_idx], i)
+                param_idx += 1
+
+        return qc
+    
+
+    @staticmethod
+    def EfficientSU2_circuit(num_qubits, depth) -> QuantumCircuit:
+        qc = QuantumCircuit(num_qubits)
+
+        data_params = ParameterVector('x', length=num_qubits)
+        # Calculate total theta parameters needed: num_qubits for each layer (depth + 1)
+        num_gates = 2
+        total_theta_params = num_qubits * 2 + num_qubits * depth * num_gates
+        theta_params = ParameterVector('θ', length=total_theta_params)
+        param_idx = 0
+
+        # Initial first layer
+        for i in range(num_qubits):
+            qc.ry(data_params[i] + theta_params[param_idx], i)
+            param_idx += 1
+        for i in range(num_qubits):
+            qc.rz(data_params[i] + theta_params[param_idx], i)
+            param_idx += 1
+        
+        # Layers of parameterized rotations and entangling gates
+        for _ in range(depth):
+            for i in range(num_qubits - 1):
+                qc.cx(i, i + 1)
+            for i in range(num_qubits):
+                qc.ry(data_params[i] + theta_params[param_idx], i)
+                param_idx += 1
+            for i in range(num_qubits):
+                qc.rz(data_params[i] + theta_params[param_idx], i)
+                param_idx += 1
+
+        return qc
+    
+
+
+
 
 if __name__ == "__main__":
     # Example usage
