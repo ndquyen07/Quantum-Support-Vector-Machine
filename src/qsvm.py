@@ -2,6 +2,7 @@ from qiskit.quantum_info import Statevector
 from qiskit import QuantumCircuit
 from qiskit_aer import AerSimulator
 from qiskit import transpile
+from qiskit_algorithms.optimizers import COBYLA, L_BFGS_B, SLSQP, SPSA
 
 from src.decompose import Decomposer
 from src.ansatz import Ansatz
@@ -16,7 +17,7 @@ class QSVC:
     Custom Variational Quantum Support Vector Classifier (QSVC) implementation.
     """
 
-    def __init__(self, C=1.0, gamma=1.0, depth=1, type_ansatz='EfficientSU2', random=False, num_samples=None, optimizer="COBYLA", max_iter=100):
+    def __init__(self, C=1.0, gamma=1.0, depth=1, type_ansatz='EfficientSU2', random=False, num_samples=None, optimizer="COBYLA", max_iter=500):
         """
         Initialize the QSVC instance.
 
@@ -270,7 +271,7 @@ class QSVC:
                 print(f"Using provided initialization with {len(initial_xi)} parameters")
             
             # Add small perturbation to avoid exact reuse (prevents local minima sticking)
-            perturbation = 0.05  # Small perturbation (5% of 2π range)
+            perturbation = 0.05
             perturbation = np.random.normal(-perturbation, perturbation, expected_param_count)
             self.initial_xi = self.initial_xi + perturbation
 
@@ -451,7 +452,6 @@ class QSVC:
         plt.plot(self.loss_history, 'b-', linewidth=2)
         plt.xlabel('Iteration')
         plt.ylabel('Loss Function Value')
-        plt.title('VQEplus Convergence')
         plt.grid(True)
         plt.show()
 
@@ -553,6 +553,12 @@ class QSVC:
             self.ansatz = Ansatz.RealAmplitudes(num_qubits, depth=depth, **kwargs)
         elif type == 'EfficientSU2':
             self.ansatz = Ansatz.EfficientSU2(num_qubits, depth=depth, **kwargs)
+        elif type == 'TwoLocal_simple':
+            self.ansatz = Ansatz.TwoLocal_simple(num_qubits, depth=depth, **kwargs)
+        elif type == 'RealAmplitudes_simple':
+            self.ansatz = Ansatz.RealAmplitudes_simple(num_qubits, depth=depth, **kwargs)
+        elif type == 'EfficientSU2_simple':
+            self.ansatz = Ansatz.EfficientSU2_simple(num_qubits, depth=depth, **kwargs)
 
 
 if __name__ == "__main__":

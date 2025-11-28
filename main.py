@@ -15,7 +15,7 @@ parser.add_argument("--type_ansatz", type=str, default="TwoLocal",
 parser.add_argument("--depth", type=int, default=1, help="Depth of the ansatz circuit")
 parser.add_argument("--C", type=float, default=1.0, help="Regularization parameter C")
 parser.add_argument("--gamma", type=float, default=1.0, help="Gamma parameter")
-parser.add_argument("--max_iter", type=int, default=100, help="Maximum iterations for optimization")
+parser.add_argument("--max_iter", type=int, default=500, help="Maximum iterations for optimization")
 args = parser.parse_args()
 
 print(f"Starting QSVC experiment - Run ID: {args.run_id}")
@@ -113,7 +113,7 @@ def main():
     results.append(result)
     
     # Create results directory if it doesn't exist
-    results_dir = "results1"
+    results_dir = "results2"
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
     

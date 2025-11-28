@@ -1,18 +1,26 @@
 import numpy as np
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import ParameterVector
 from qiskit.quantum_info import Statevector
-from scipy.optimize import minimize
 
 
 class TrainableQuantumFeatureMap:
-    """Trainable Quantum Feature Map (TQFM) implementation."""
+    """Trainable Quantum Feature Map (TQFM) implementation.
+    
+    Optimized for performance with:
+    - AerSimulator for fast batch statevector computation
+    - Persistent caching across optimizer iterations
+    - Vectorized numpy operations
+    """
 
-    def __init__(self, depth: int = 1, type_ansatz: str = "EfficientSU2" , optimizer: str = 'COBYLA', maxiter: int = 100):
+    def __init__(self, depth: int = 1, type_ansatz: str = "EfficientSU2", full_entangle: bool = False, 
+                 use_aer: bool = True, batch_size: int = 50):
         self.depth = depth
         self.type = type_ansatz
-        self.optimizer = optimizer
-        self.maxiter = maxiter
+        self.full_entangle = full_entangle
+        self.optimizer = None
+        self.use_aer = use_aer
+        self.batch_size = batch_size  # Number of circuits to batch in AerSimulator
 
         self.num_qubits = None
         self.init_theta = None
@@ -26,106 +34,187 @@ class TrainableQuantumFeatureMap:
         self.optimal_value = None
 
         self.loss_history = []
+        
+        # Cache for optimization
+        self._class_patterns_cache = {}
+        self._basis_states_cache = None
+        self._class_indices_cache = None
+        self._data_params_cache = None
+        self._theta_params_cache = None
+        self._simulator = None
+        self._transpiled_circuit = None
+
+
+    def _get_class_patterns(self, num_classes):
+        """Get or create class patterns with caching."""
+        if num_classes in self._class_patterns_cache:
+            return self._class_patterns_cache[num_classes]
+        
+        # Generate class patterns
+        if num_classes <= 2:
+            patterns = {i: format(i, 'b') for i in range(num_classes)}
+        elif num_classes <= 4:
+            patterns = {i: format(i, '02b') for i in range(num_classes)}
+        elif num_classes <= 8:
+            patterns = {i: format(i, '03b') for i in range(num_classes)}
+        elif num_classes <= 16:
+            patterns = {i: format(i, '04b') for i in range(num_classes)}
+        else:
+            raise ValueError(f"Number of classes {num_classes} not supported (max 16)")
+        
+        self._class_patterns_cache[num_classes] = patterns
+        return patterns
+
+
+    def _initialize_loss_cache(self, num_qubits, X, y, circuit_template, num_classes):
+        """Initialize all caches that remain constant during optimization."""
+        # Cache class patterns
+        class_patterns = self._get_class_patterns(num_classes)
+        
+        # Cache class indices
+        self._class_indices_cache = {}
+        class_sizes = np.zeros(num_classes, dtype=int)
+        for j in range(num_classes):
+            idx = np.where(y == j)[0]
+            self._class_indices_cache[j] = idx
+            class_sizes[j] = len(idx)
+        
+        # Cache parameter mappings
+        self._data_params_cache = list(circuit_template.parameters)[:X.shape[1]]
+        self._theta_params_cache = list(circuit_template.parameters)[X.shape[1]:]
+        
+        # Initialize AerSimulator if requested
+        if self.use_aer:
+            try:
+                from qiskit_aer import AerSimulator
+                self._simulator = AerSimulator(method='statevector')
+                # Transpile circuit once for better performance
+                self._transpiled_circuit = transpile(circuit_template, self._simulator)
+                print("Using AerSimulator for accelerated statevector computation")
+            except ImportError:
+                print("Warning: qiskit-aer not found. Falling back to standard Statevector.")
+                self.use_aer = False
+                self._simulator = None
+        
+        # Cache basis states
+        self._basis_states_cache = {}
+        for j in range(num_classes):
+            pattern = class_patterns[j]
+            if num_qubits > len(pattern):
+                remaining_qubits = num_qubits - len(pattern)
+                num_basis_states = 2**remaining_qubits
+                # Preallocate array for all basis states
+                basis_vectors = np.empty((num_basis_states, 2**num_qubits), dtype=complex)
+                for state_idx in range(num_basis_states):
+                    remaining_bits = format(state_idx, f'0{remaining_qubits}b')
+                    full_state = pattern + remaining_bits
+                    basis_vectors[state_idx] = Statevector.from_label(full_state).data
+                self._basis_states_cache[j] = basis_vectors
+            else:
+                self._basis_states_cache[j] = Statevector.from_label(pattern).data
+        
+        return class_sizes
 
 
     def _loss(self, theta, num_qubits, X, y, circuit_template, num_classes):
         """
         Compute the loss function as defined in the equation:
         E(theta) = 1 - (1/L) * sum_{j=1}^L (1/M_j) * sum_{i=1}^{M_j} |<psi(x_i^j, theta)|y_j>|^2
-
+        
+        Optimized version with caching and vectorization.
         """
-    
-        if num_classes == 2:
-            y_binary = np.where(y == -1, 0, 1)
-            class_patterns = {0: '0', 1: '1'}
-        elif num_classes == 3:
-            class_patterns = {0: '00', 1: '01', 2: '10'}
-
-        loss = 0.0
-
+        # Initialize cache on first call
+        if self._basis_states_cache is None:
+            class_sizes = self._initialize_loss_cache(num_qubits, X, y, circuit_template, num_classes)
+        else:
+            class_sizes = np.array([len(self._class_indices_cache[j]) for j in range(num_classes)])
+        
+        # Build theta parameter dictionary once
+        theta_dict = dict(zip(self._theta_params_cache, theta))
+        
+        # Accumulate loss across all classes
+        total_weighted_prob = 0.0
+        
         for j in range(num_classes):
-            # Select samples of class j
-            idx = np.where(y_binary == j)[0]
-            M_j = len(idx)
+            idx = self._class_indices_cache[j]
+            M_j = class_sizes[j]
             if M_j == 0:
                 continue
-            class_loss = 0.0
-            for i in idx:
-                # Bind Data parameters
-                param_dict = {}
-                for k in range(X.shape[1]):
-                    param_dict[circuit_template.parameters[k]] = X[i, k]
-                # Bind Theta parameters
-                theta_params = list(circuit_template.parameters)[X.shape[1]:]
-                for k, t in enumerate(theta):
-                    param_dict[theta_params[k]] = t
+            
+            X_class = X[idx]
+            basis_state = self._basis_states_cache[j]
+            is_multi_basis = isinstance(basis_state, np.ndarray) and basis_state.ndim == 2
+            
+            # Accumulate probabilities for this class
+            class_prob_sum = 0.0
+            
+            for x_sample in X_class:
+                # Build full parameter dictionary efficiently
+                param_dict = theta_dict.copy()
+                for k, param in enumerate(self._data_params_cache):
+                    param_dict[param] = x_sample[k]
+                
                 # Get statevector
-                psi = Statevector.from_instruction(circuit_template.assign_parameters(param_dict))
-
-                if num_qubits > len(class_patterns[j]):
-                    prob = 0.0
-                    pattern = class_patterns[j]
-                    remaining_qubits = X.shape[1] - len(pattern)
-                    # Sum over all possible states for the remaining qubits
-                    for state_idx in range(2**remaining_qubits):
-                        # Create full basis state string
-                        remaining_bits = format(state_idx, f'0{remaining_qubits}b')
-                        full_state = pattern + remaining_bits
-                        
-                        # Create basis state and compute probability
-                        y_j = Statevector.from_label(full_state)
-                        prob += np.abs(np.vdot(psi.data, y_j.data))**2
+                psi_data = Statevector.from_instruction(
+                    circuit_template.assign_parameters(param_dict)
+                ).data
+                
+                # Compute probability
+                if is_multi_basis:
+                    # Vectorized: compute all inner products at once
+                    inner_products = basis_state @ psi_data.conj()
+                    class_prob_sum += np.sum(np.abs(inner_products)**2)
                 else:
-                    # Create basis state for class j
-                    pattern = class_patterns[j]
-                    y_j = Statevector.from_label(pattern)
-                    prob = np.abs(np.vdot(psi.data, y_j.data))**2
-
-                class_loss += prob
-            loss += class_loss / M_j
-        loss = 1 - (loss / num_classes)
-
-        # Store loss history    
+                    # Single basis state
+                    class_prob_sum += np.abs(np.vdot(basis_state, psi_data))**2
+            
+            total_weighted_prob += class_prob_sum / M_j
+        
+        loss = 1.0 - (total_weighted_prob / num_classes)
+        
+        # Store loss history
         self.loss_history.append(loss)
-        # print(f"Iteration {len(self.loss_history)}: Loss = {loss}")
         
         return loss
+    
 
 
 
-    def fit(self, X: np.ndarray, y: np.ndarray, init_theta: np.ndarray=None, circuit: QuantumCircuit=None) -> float:
+    def fit(self, X: np.ndarray, y: np.ndarray, optimizer, init_theta: np.ndarray=None, circuit: QuantumCircuit=None) -> float:
         """Fit the quantum feature map to the data."""
         self.X = X
         self.y = y
+        self.optimizer = optimizer
 
         self.num_qubits = X.shape[1]
         self.num_classes = len(np.unique(y))
+        print(f"Number of qubits: {self.num_qubits}, Number of classes: {self.num_classes}")
 
         if circuit is None:
-            self._set_circuit(type=self.type)
+            self._set_circuit(type=self.type, full_entangle=self.full_entangle)
         else:
             self.circuit = circuit
 
+        num_params = len(self.circuit.parameters) - self.num_qubits
         if init_theta is None:
-            num_params = len(self.circuit.parameters) - self.num_qubits
-            # self.init_theta = np.random.uniform(-np.pi, np.pi, num_params)
-            self.init_theta = np.zeros((num_params,))
+            self.init_theta = np.random.uniform(-np.pi, np.pi, num_params)
+            # self.init_theta = np.zeros((num_params,))
         else:
-            self.init_theta = init_theta
+            perturbation = np.pi / 10
+            perturbation = np.random.normal(-perturbation, perturbation, num_params)
+            self.init_theta = init_theta + perturbation
 
         
-        # Clear previous loss history
+        # Clear previous loss history and caches
         self.loss_history = []
+        self._basis_states_cache = None
+        self._class_indices_cache = None
+        self._data_params_cache = None
+        self._theta_params_cache = None
 
-        # Perform optimization
-        self.optimizer_options = {'maxiter': self.maxiter, 'disp': True}
-        result = minimize(
-            fun=self._loss,
-            x0=self.init_theta,
-            args=(self.num_qubits, X, y, self.circuit, self.num_classes),
-            method=self.optimizer,
-            options=self.optimizer_options
-            )
+        # Perform optimization using the optimizer parameter
+        fun = lambda theta: self._loss(theta, self.num_qubits, X, y, self.circuit, self.num_classes)
+        result = self.optimizer.minimize(fun, x0=self.init_theta)
 
         # Store results
         self.optimal_params = result.x
@@ -180,15 +269,19 @@ class TrainableQuantumFeatureMap:
         plt.close()
 
 
-    def _set_circuit(self, type= 'EfficientSU2'):
-
-        """Set a custom quantum circuit."""
+    def _set_circuit(self, type='EfficientSU2', full_entangle=False):
+        """Set a custom quantum circuit.
+        
+        Args:
+            type: Type of ansatz ('TwoLocal', 'RealAmplitudes', 'EfficientSU2')
+            full_entangle: If True, use all-to-all entanglement. If False, use linear (nearest-neighbor) entanglement.
+        """
         if type == 'TwoLocal':
-            self.circuit = ParametrizedCircuit.TwoLocal_circuit(self.num_qubits, self.depth)
+            self.circuit = ParametrizedCircuit.TwoLocal_circuit(self.num_qubits, self.depth, full_entangle)
         elif type == 'RealAmplitudes':
-            self.circuit = ParametrizedCircuit.RealAmplitudes_circuit(self.num_qubits, self.depth)
+            self.circuit = ParametrizedCircuit.RealAmplitudes_circuit(self.num_qubits, self.depth, full_entangle)
         elif type == 'EfficientSU2':
-            self.circuit = ParametrizedCircuit.EfficientSU2_circuit(self.num_qubits, self.depth)
+            self.circuit = ParametrizedCircuit.EfficientSU2_circuit(self.num_qubits, self.depth, full_entangle)
         else:
             raise ValueError(f"Unknown circuit type: {type}")
         
@@ -218,7 +311,7 @@ class ParametrizedCircuit:
     """Class to create parameterized quantum circuits (ansatz)."""
 
     @staticmethod
-    def TwoLocal_circuit(num_qubits, depth) -> QuantumCircuit:
+    def TwoLocal_circuit(num_qubits, depth, full_entangle=False) -> QuantumCircuit:
         qc = QuantumCircuit(num_qubits)
 
         data_params = ParameterVector('x', length=num_qubits)
@@ -238,8 +331,18 @@ class ParametrizedCircuit:
         
         # Layers of parameterized rotations and entangling gates
         for _ in range(depth):
-            for i in range(num_qubits - 1):
-                qc.cz(i, i + 1)
+            # Entangling layer
+            if full_entangle:
+                # Full entanglement: all-to-all connectivity
+                for i in range(num_qubits):
+                    for j in range(i + 1, num_qubits):
+                        qc.cz(i, j)
+            else:
+                # Linear entanglement: nearest-neighbor connectivity
+                for i in range(num_qubits - 1):
+                    qc.cz(i, i + 1)
+            
+            # Rotation layer
             for i in range(num_qubits):
                 qc.ry(data_params[i] + theta_params[param_idx], i)
                 param_idx += 1
@@ -251,7 +354,7 @@ class ParametrizedCircuit:
 
 
     @staticmethod
-    def RealAmplitudes_circuit(num_qubits, depth) -> QuantumCircuit:
+    def RealAmplitudes_circuit(num_qubits, depth, full_entangle=False) -> QuantumCircuit:
         qc = QuantumCircuit(num_qubits)
 
         data_params = ParameterVector('x', length=num_qubits)
@@ -268,8 +371,18 @@ class ParametrizedCircuit:
 
         # Layers of parameterized rotations and entangling gates
         for _ in range(depth):
-            for i in range(num_qubits - 1):
-                qc.cx(i, i + 1)
+            # Entangling layer
+            if full_entangle:
+                # Full entanglement: all-to-all connectivity
+                for i in range(num_qubits):
+                    for j in range(i + 1, num_qubits):
+                        qc.cx(i, j)
+            else:
+                # Linear entanglement: nearest-neighbor connectivity
+                for i in range(num_qubits - 1):
+                    qc.cx(i, i + 1)
+            
+            # Rotation layer
             for i in range(num_qubits):
                 qc.ry(data_params[i] + theta_params[param_idx], i)
                 param_idx += 1
@@ -278,7 +391,7 @@ class ParametrizedCircuit:
     
 
     @staticmethod
-    def EfficientSU2_circuit(num_qubits, depth) -> QuantumCircuit:
+    def EfficientSU2_circuit(num_qubits, depth, full_entangle=False) -> QuantumCircuit:
         qc = QuantumCircuit(num_qubits)
 
         data_params = ParameterVector('x', length=num_qubits)
@@ -298,8 +411,18 @@ class ParametrizedCircuit:
         
         # Layers of parameterized rotations and entangling gates
         for _ in range(depth):
-            for i in range(num_qubits - 1):
-                qc.cx(i, i + 1)
+            # Entangling layer
+            if full_entangle:
+                # Full entanglement: all-to-all connectivity
+                for i in range(num_qubits):
+                    for j in range(i + 1, num_qubits):
+                        qc.cx(i, j)
+            else:
+                # Linear entanglement: nearest-neighbor connectivity
+                for i in range(num_qubits - 1):
+                    qc.cx(i, i + 1)
+            
+            # Rotation layer
             for i in range(num_qubits):
                 qc.ry(data_params[i] + theta_params[param_idx], i)
                 param_idx += 1

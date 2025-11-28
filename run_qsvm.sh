@@ -12,5 +12,5 @@
 
 cd /home/$USER/SVQSVM/
 
-python3.13 main.py --run_id ${SLURM_ARRAY_TASK_ID} --type_ansatz="custom1" --depth=1
+python3.13 main.py --run_id ${SLURM_ARRAY_TASK_ID} --type_ansatz="EfficientSU2" --C=10.0 --depth=1 --max_iter=500
 

@@ -1,10 +1,11 @@
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import ParameterVector
+from qiskit.circuit.library import TwoLocal, RealAmplitudes, EfficientSU2
 
 class Ansatz:
     @staticmethod
-    def TwoLocal(num_qubits, depth=1):
+    def TwoLocal_simple(num_qubits, depth=1):
         """Creates a TwoLocal ansatz."""
         qc = QuantumCircuit(num_qubits, name='Ansatz')
         num_gates = 2
@@ -34,7 +35,7 @@ class Ansatz:
     
     
     @staticmethod
-    def RealAmplitudes(num_qubits, depth=1):
+    def RealAmplitudes_simple(num_qubits, depth=1):
         """Creates a RealAmplitudes ansatz."""
         qc = QuantumCircuit(num_qubits, name='Ansatz')
         num_gates = 1
@@ -59,7 +60,7 @@ class Ansatz:
     
 
     @staticmethod
-    def EfficientSU2(num_qubits, depth=1, parameter_prefix='ξ', entanglement='linear'):
+    def EfficientSU2_simple(num_qubits, depth=1, parameter_prefix='ξ', entanglement='linear'):
         """Creates an EfficientSU2 ansatz."""
         qc = QuantumCircuit(num_qubits, name='Ansatz')
         num_gates = 2
@@ -87,6 +88,21 @@ class Ansatz:
 
         return qc
     
+    @staticmethod
+    def TwoLocal(num_qubits, depth=1, parameter_prefix='ξ', entanglement='linear'):
+        """Creates a TwoLocal ansatz using Qiskit's built-in TwoLocal class."""
+        return TwoLocal(num_qubits, ['ry', 'rz'], 'cz', reps=depth, parameter_prefix=parameter_prefix, entanglement=entanglement)
+
+    @staticmethod
+    def RealAmplitudes(num_qubits, depth=1, parameter_prefix='ξ', entanglement='linear'):
+        """Creates a RealAmplitudes ansatz using Qiskit's built-in RealAmplitudes class."""
+        return RealAmplitudes(num_qubits, reps=depth, parameter_prefix=parameter_prefix, entanglement=entanglement)
+
+    @staticmethod
+    def EfficientSU2(num_qubits, depth=1, parameter_prefix='ξ', entanglement='linear'):
+        """Creates an EfficientSU2 ansatz using Qiskit's built-in EfficientSU2 class."""
+        return EfficientSU2(num_qubits, reps=depth, parameter_prefix=parameter_prefix, entanglement=entanglement)
+
 
     @staticmethod
     def custom_ansatz1(num_qubits, depth=1):
@@ -140,6 +156,9 @@ class Ansatz:
                 qc.rz(xi[param_idx], i)
         return qc
 
+
+
+    
 if __name__ == "__main__":
     # Example usage
     ansatz = Ansatz.EfficientSU2(4, 1)
