@@ -1,7 +1,7 @@
 import time
 import os
 import argparse
-from src.feature_map import TrainableQuantumFeatureMap
+from src.feature_map1 import TrainableQuantumFeatureMap
 import numpy as np
 import pickle
 from src.kernel_estimate import KernelMatrix
