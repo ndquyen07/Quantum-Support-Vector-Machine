@@ -1,6 +1,9 @@
 {
     "run_id": 4,
     "depth": 2,
-    "mean_loss": 0.4228839079462013,
-    "mean_acc": 0.8733333333333333
+    "mean_loss": 0.49997981330329216,
+    "mean_val_before": 0.553125,
+    "mean_test_before": 0.525,
+    "mean_val_after": 0.546875,
+    "mean_test_after": 0.5625
 }
